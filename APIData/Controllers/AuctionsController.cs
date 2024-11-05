@@ -1,108 +1,122 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading.Tasks;
-using Microsoft.AspNetCore.Http;
+﻿using APIData.Data;
+using APIData.DTOs;
+using APIData.Entities;
+using AutoMapper;
+using AutoMapper.QueryableExtensions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using APIData.Data;
-using APIData.Entities;
 
 namespace APIData.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    public class AuctionsController : ControllerBase
+    public class AuctionsController(AucionDbContext context, IMapper mapper) : ControllerBase
     {
-        private readonly AucionDbContext _context;
 
-        public AuctionsController(AucionDbContext context)
-        {
-            _context = context;
-        }
 
         // GET: api/Auctions
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<Auction>>> GetAuctions()
+        public async Task<ActionResult<List<AuctionDto>>> GetAuctions( string? date)
         {
-            return await _context.Auctions.ToListAsync();
+            var query = context.Auctions.Include(a => a.Premise).AsQueryable();
+            if (date != null)
+            {
+                query = query.Where(x => x.UpdatedAt.CompareTo(DateTime.Parse(date).ToUniversalTime()) > 0);
+            }
+            return await query.ProjectTo<AuctionDto>(mapper.ConfigurationProvider).ToListAsync();
         }
 
         // GET: api/Auctions/5
         [HttpGet("{id}")]
-        public async Task<ActionResult<Auction>> GetAuction(int id)
+        public async Task<ActionResult<AuctionDto>> GetAuctionById(int id)
         {
-            var auction = await _context.Auctions.FindAsync(id);
+            var auction = await context.Auctions.Include(x => x.Premise)
+                .FirstOrDefaultAsync(x => x.Id == id);
 
             if (auction == null)
             {
                 return NotFound();
             }
 
-            return auction;
+            return mapper.Map<AuctionDto>(auction);
         }
 
         // PUT: api/Auctions/5
         // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
         [HttpPut("{id}")]
-        public async Task<IActionResult> PutAuction(int id, Auction auction)
+        public async Task<IActionResult> PutAuction(int id, UpdateAuctionDto updateAuctionDto)
         {
-            if (id != auction.Id)
+            if (id != updateAuctionDto.Id)
             {
                 return BadRequest();
             }
 
-            _context.Entry(auction).State = EntityState.Modified;
+            var auction = await context.Auctions
+                .Include(x => x.Premise)
+                .FirstOrDefaultAsync(x => x.Id == id);
+            if (auction == null) return NotFound();
 
-            try
-            {
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateConcurrencyException)
-            {
-                if (!AuctionExists(id))
-                {
-                    return NotFound();
-                }
-                else
-                {
-                    throw;
-                }
-            }
+            auction.Status = updateAuctionDto.Status;
+            auction.Seller = updateAuctionDto.Seller;
+            auction.Winner = updateAuctionDto.Winner;
+            auction.RentedAmount = updateAuctionDto.RentedAmount;
+            auction.CurrentHighBid = updateAuctionDto.CurrentHighBid;
+            auction.AuctionEnd = updateAuctionDto.AuctionEnd;
+            auction.DoorNum = updateAuctionDto.DoorNum;
+            auction.Address = updateAuctionDto.Address;
+            auction.ImageUrl = updateAuctionDto.ImageUrl;
+            auction.PremiseId = updateAuctionDto.PremiseId;
 
-            return NoContent();
+            var result = await context.SaveChangesAsync() > 0;
+            if (result) return Ok();
+
+            return BadRequest("Failed to update auction");
+
+            
         }
 
         // POST: api/Auctions
         // To protect from overposting attacks, see https://go.microsoft.com/fwlink/?linkid=2123754
         [HttpPost]
-        public async Task<ActionResult<Auction>> PostAuction(Auction auction)
+        public async Task<ActionResult<Auction>> PostAuction(AddAuctionDto addAuctionDto)
         {
-            _context.Auctions.Add(auction);
-            await _context.SaveChangesAsync();
 
-            return CreatedAtAction("GetAuction", new { id = auction.Id }, auction);
+            var auction = mapper.Map<Auction>(addAuctionDto);
+            auction.Seller = "Unknown user";
+
+            context.Auctions.Add(auction);
+
+
+           var result = await context.SaveChangesAsync();
+
+            if (result == 0) return BadRequest("Could not save changes to DB");
+
+            return CreatedAtAction(nameof(GetAuctionById),
+            new { auction.Id }, mapper.Map<AuctionDto>(auction));
+            
         }
 
-        // DELETE: api/Auctions/5
+
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteAuction(int id)
         {
-            var auction = await _context.Auctions.FindAsync(id);
-            if (auction == null)
-            {
-                return NotFound();
-            }
+            var auction = await context.Auctions.FindAsync(id);
 
-            _context.Auctions.Remove(auction);
-            await _context.SaveChangesAsync();
+            if (auction == null) return NotFound();
 
-            return NoContent();
+            context.Auctions.Remove(auction);
+
+
+            var result = await context.SaveChangesAsync() > 0;
+
+            if (!result) return BadRequest("Could not update DB");
+
+            return Ok();
         }
 
         private bool AuctionExists(int id)
         {
-            return _context.Auctions.Any(e => e.Id == id);
+            return context.Auctions.Any(e => e.Id == id);
         }
     }
 }
